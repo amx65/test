@@ -22,7 +22,6 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   const meta = parts[0]; // e.g., "data:text/plain;base64"
   const base64Data = parts[1];
 
-  // Regex to ensure the meta part is "data:<mimetype>;base64"
   const mimeTypeMatch = meta.match(/^data:(.+);base64$/);
   if (!mimeTypeMatch || !mimeTypeMatch[1]) {
     console.error("Could not determine MIME type or base64 encoding from Data URI. Meta part:", meta);
@@ -30,8 +29,14 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   }
   const mimeType = mimeTypeMatch[1];
 
-  if (base64Data === undefined || base64Data === null) { // Check if base64Data is present
+  if (base64Data === undefined || base64Data === null) {
       throw new Error('Invalid Data URI: Base64 data part is missing.');
+  }
+
+  // Check for unsupported types before attempting to process the buffer
+  if (mimeType === 'application/pdf' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt file or enhance this function.`);
+    throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt file for now. Advanced parsing for this file type needs to be added.`);
   }
 
   try {
@@ -39,16 +44,15 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
 
     if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
-    } else if (mimeType === 'application/pdf' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt file or enhance this function.`);
-      throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt file for now. Advanced parsing for this file type needs to be added.`);
     } else {
+      // For any other types not explicitly handled as unsupported above, try to decode as UTF-8 with a warning.
       console.warn(`Attempting UTF-8 decoding for unsupported MIME type: ${mimeType}. Results may vary.`);
-      return buffer.toString('utf-8'); // Fallback, might produce gibberish for binary files
+      return buffer.toString('utf-8'); 
     }
   } catch (error: any) {
+    // This catch block now primarily handles errors from Buffer.from or buffer.toString for text/plain or other fallback types
     console.error(`Error decoding Base64 content for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
-    throw new Error(`Failed to decode Base64 content or convert to buffer for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${error.message}`);
+    throw new Error(`Failed to decode or process content for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${error.message}`);
   }
 }
 
