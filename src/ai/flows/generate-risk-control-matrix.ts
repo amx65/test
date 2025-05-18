@@ -75,13 +75,15 @@ For each clause, create an RCM entry with the following fields:
 - auditTest: Propose an audit test to validate control effectiveness (data source, sampling, expected outcome).
 - recommendedAction: Recommend an action to address the identified risk or control gap.
 
+If the document text is very short, contains no clear policy statements, or is otherwise not suitable for RCM generation, return an empty "rcmEntries" array.
+
 The policy document text is as follows:
 ---
 ${documentText}
 ---
 
 Return the RCM in JSON format, ensuring the entire response is a single JSON object matching this structure:
-{ "rcmEntries": [ /* full entries including controlType */ ] }
+{ "rcmEntries": [ /* full entries including controlType, or an empty array if not applicable */ ] }
 Do not include any explanatory text before or after the JSON object.
 `;
 
@@ -95,7 +97,7 @@ Do not include any explanatory text before or after the JSON object.
         'X-Title': 'Policy Compliance Analyzer',
       },
       body: JSON.stringify({
-        model: modelName, // Use the dynamic modelName
+        model: modelName, 
         messages: [{ role: 'user', content: promptText }],
       }),
     });
@@ -129,6 +131,9 @@ Do not include any explanatory text before or after the JSON object.
 
   } catch (error: any) {
     console.error('Error in generateRiskControlMatrix flow:', error);
-    throw new Error(`Failed to generate RCM via OpenRouter with model ${modelName}: ${error.message}`);
+    // Ensure the error message is propagated
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to generate RCM via OpenRouter with model ${modelName}: ${message}`);
   }
 }
+

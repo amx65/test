@@ -41,7 +41,6 @@ const AVAILABLE_MODELS = [
   { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)"},
   { id: "nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free", name: "Nous: Hermes 2 Mixtral 8x7B DPO (Free)"},
   { id: "gryphe/gryphe-mistral-7b-v2:free", name: "Gryphe: Mistral 7B v2 (Free)"},
-
 ];
 
 export default function FileUploadSection({ openRouterApiKey, onProcessingComplete }: FileUploadSectionProps) {
@@ -115,7 +114,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
           setIsTestingModel(false);
         }
       } else {
-        setIsModelVerified(false); // Reset if key or model is removed
+        setIsModelVerified(false); 
         setModelTestError(null);
       }
     };
@@ -142,7 +141,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
     }
 
     setIsLoading(true);
-    setError(null); // Clear general errors
+    setError(null); 
     setProgress(0);
     setStatusMessage("Preparing document...");
 
@@ -157,27 +156,33 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       const { generateRcmAction } = await import("@/app/actions");
       let currentProgress = 40;
       const progressInterval = setInterval(() => {
-        currentProgress = Math.min(currentProgress + 2, 95); // Stop at 95 to show completion after API call
+        currentProgress = Math.min(currentProgress + 2, 95); 
         setProgress(currentProgress);
-      }, 1500); // Simulate progress increase every 1.5s
+      }, 1500); 
 
       const result = await generateRcmAction({ documentDataUri, openRouterApiKey, modelName: selectedModel });
+      clearInterval(progressInterval);
 
-      clearInterval(progressInterval); // Stop simulation
+      if (!result) {
+        throw new Error("Server action did not return a recognizable response.");
+      }
 
       if (result.data) {
         setProgress(100);
         setStatusMessage("Analysis complete!");
         onProcessingComplete(result.data, file.name);
+      } else if (result.error) {
+        // If server action returned a structured error, use that message
+        throw new Error(result.error);
       } else {
-        // Error from generateRcmAction
-        throw new Error(result.error || "Failed to process document.");
+        // Fallback if the result object is malformed (neither data nor error)
+        throw new Error("Server action returned an invalid response structure.");
       }
     } catch (err: any) {
-      setProgress(0); // Reset progress on error
-      console.error("Processing error:", err);
-      // Set the general error state for display
-      setError(err.message || "An unexpected error occurred during processing.");
+      setProgress(0); 
+      console.error("Processing error in FileUploadSection:", err);
+      // Display the error message. If err.message is empty, provide a default.
+      setError(err.message || "An unexpected client-side error occurred during processing.");
       setStatusMessage("Processing failed. Please try again.");
     } finally {
       setIsLoading(false);
@@ -215,7 +220,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
                 ))}
               </SelectContent>
             </Select>
-            {openRouterApiKey && ( // Only show test status if API key is present
+            {openRouterApiKey && ( 
                 isTestingModel ? (
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                 ) : isModelVerified ? (
@@ -233,8 +238,8 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
                     </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
-                ) : selectedModel && ( // If model selected but no test outcome yet (e.g. initial load or key change)
-                   <div className="h-5 w-5"></div> // Placeholder for alignment
+                ) : selectedModel && ( 
+                   <div className="h-5 w-5"></div> 
                 )
             )}
           </div>
@@ -255,7 +260,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
           </div>
         </div>
 
-        {file && !isLoading && ( // Simplified: always show remove button if file and not loading
+        {file && !isLoading && ( 
           <div className="p-3 bg-muted rounded-md border border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-primary" />
@@ -274,7 +279,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
           </div>
         )}
 
-        {error && ( // General error display
+        {error && ( 
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Error</AlertTitle>
