@@ -82,9 +82,9 @@ The policy document text is as follows:
 ${documentText}
 ---
 
-Return the RCM in JSON format, ensuring the entire response is a single JSON object matching this structure:
+IMPORTANT: Return ONLY the RCM in JSON format. The entire response must be a single JSON object matching this structure:
 { "rcmEntries": [ /* full RCM entries as described above, or an empty array if the document is not suitable */ ] }
-Do not include any explanatory text, markdown formatting like \`\`\`json, or any other content before or after the JSON object. The response must be solely the JSON object.
+Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any other content before or after the JSON object. The response must be solely the JSON object itself.
 `;
 
   try {
@@ -99,6 +99,8 @@ Do not include any explanatory text, markdown formatting like \`\`\`json, or any
       body: JSON.stringify({
         model: modelName, 
         messages: [{ role: 'user', content: promptText }],
+        // Ensure response is JSON
+        response_format: { type: "json_object" }, 
       }),
     });
 
@@ -126,21 +128,27 @@ Do not include any explanatory text, markdown formatting like \`\`\`json, or any
     
     if (!result.choices || result.choices.length === 0 || !result.choices[0].message || !result.choices[0].message.content) {
         console.error('Invalid response structure from OpenRouter:', result);
-        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}. Check API logs.`);
+        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}. The AI did not provide any content. Check API logs.`);
     }
     
     const assistantResponseText = result.choices[0].message.content;
+    if (typeof assistantResponseText !== 'string' || assistantResponseText.trim() === "") {
+        console.error('Empty or non-string content from OpenRouter assistant:', assistantResponseText);
+        throw new Error(`Received empty or non-string content from the AI model ${modelName}.`);
+    }
 
     let parsedJson;
     try {
-        // Attempt to remove markdown code block fences if present
+        // Attempt to remove markdown code block fences if present, though the prompt now explicitly forbids it
         const cleanedResponseText = assistantResponseText.replace(/^```json\s*|```$/g, '').trim();
+        if (cleanedResponseText === "") {
+            throw new Error("AI returned an empty string after cleaning markdown.");
+        }
         parsedJson = JSON.parse(cleanedResponseText);
     } catch (e: any) {
         console.error('Failed to parse JSON response from OpenRouter:', assistantResponseText, e);
-        // Provide a more helpful error if parsing fails
         const snippet = assistantResponseText.substring(0, 200) + (assistantResponseText.length > 200 ? "..." : "");
-        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. The AI might have returned malformed JSON or included extra text. Start of response: "${snippet}"`);
+        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. The AI might have returned malformed JSON or included extra text. Start of response: "${snippet}". Original parsing error: ${e.message}`);
     }
     
     // Validate the parsed JSON against the Zod schema
@@ -148,11 +156,13 @@ Do not include any explanatory text, markdown formatting like \`\`\`json, or any
     return validatedOutput;
 
   } catch (error: any) {
-    console.error('Error in generateRiskControlMatrix flow:', error);
-    // Ensure the error message is propagated
+    console.error('Error in generateRiskControlMatrix flow:', error.name, error.message, error.stack);
     const message = error instanceof Error ? error.message : String(error);
     // Avoid re-wrapping if it's already a specific error from above
-    if (message.startsWith("OpenRouter API request failed") || message.startsWith("Failed to parse the AI's JSON response") || message.startsWith("Received an invalid response structure")) {
+    if (message.startsWith("OpenRouter API request failed") || 
+        message.startsWith("Failed to parse the AI's JSON response") || 
+        message.startsWith("Received an invalid response structure") ||
+        message.startsWith("Received empty or non-string content")) {
         throw error;
     }
     throw new Error(`Failed to generate RCM via OpenRouter with model ${modelName}: ${message}`);

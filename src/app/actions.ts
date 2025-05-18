@@ -2,6 +2,8 @@
 "use server";
 
 import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+// pdf-parse is dynamically imported below
+
 
 // Helper function to extract text from Data URI
 async function extractTextFromDataUri(dataUri: string): Promise<string> {
@@ -48,7 +50,8 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
         const pdf = (await import('pdf-parse')).default;
         const data = await pdf(buffer);
         if (!data || typeof data.text !== 'string') {
-          throw new Error('PDF parsing did not return the expected text structure.');
+          console.error("pdf-parse did not return the expected text structure. Data received:", data);
+          throw new Error('PDF parsing did not return the expected text structure (e.g., missing text field or not a string).');
         }
         return data.text;
       } catch (pdfError: any) {
@@ -69,7 +72,7 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
         error.message.startsWith("Direct text extraction for") ||
         error.message.startsWith("The PDF file appears to be empty") ||
         error.message.startsWith("Unsupported file type:") ||
-        error.message.startsWith("PDF parsing did not return the expected text structure.")) {
+        error.message.startsWith("PDF parsing did not return the expected text structure")) {
         throw error; 
     }
     // Fallback for other errors during buffer conversion or text decoding
@@ -95,8 +98,6 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
     const responseBodyText = await response.text(); 
 
     if (response.ok) {
-      // Optionally check if responseBodyText contains useful data, e.g. {"data": {"key_status": "active"}}
-      // For now, a 200 OK is considered valid.
       return { isValid: true };
     } else {
       let errorMessage = `API Key validation failed (Status: ${response.status}).`;
@@ -168,14 +169,12 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
             const errorData = JSON.parse(responseBodyText);
             if (errorData.error && errorData.error.message) {
               errorMessage += ` Message: ${errorData.error.message}`;
-            } else if (errorData.message) { // some OpenRouter errors use "message" directly
+            } else if (errorData.message) { 
                errorMessage += ` Message: ${errorData.message}`;
             } else {
-               // Truncate if response is too long
                errorMessage += ` Response: ${responseBodyText.substring(0, 300)}${responseBodyText.length > 300 ? "..." : ""}`;
             }
         } catch (e) {
-            // If response is not JSON or JSON parsing fails
             errorMessage += ` Raw Response: ${responseBodyText.substring(0, 300)}${responseBodyText.length > 300 ? "..." : ""}`;
         }
         
@@ -188,7 +187,6 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
         if (response.status === 404) { 
              return { success: false, error: `Model test failed: Model ${modelName} not found or not accessible. (404). Details: ${errorMessage}` };
         }
-        // For other HTTP errors
         return { success: false, error: errorMessage.trim() };
     }
   } catch (error: any) {
@@ -218,7 +216,7 @@ export async function generateRcmAction(
     const documentText = await extractTextFromDataUri(params.documentDataUri);
 
     if (!documentText || documentText.trim() === "") {
-        return { error: `${RCM_ERROR_PREFIX}Extracted document text is empty. Cannot proceed with RCM generation. The document might be empty or not parseable.` };
+        return { error: `${RCM_ERROR_PREFIX}Extracted document text is empty. Cannot proceed with RCM generation. The document might be empty, not parseable, or contain no extractable text.` };
     }
 
     const input: GenerateRiskControlMatrixInput = {
@@ -228,35 +226,35 @@ export async function generateRcmAction(
     };
 
     const result = await generateRiskControlMatrix(input);
-    // Ensure the result from the flow has the expected structure
+    
     if (result && Array.isArray(result.rcmEntries)) {
         return { data: result };
     } else {
-        console.error("[generateRcmAction] AI flow returned unexpected data structure:", result);
-        return { error: `${RCM_ERROR_PREFIX}AI flow returned an unexpected data structure. Expected { rcmEntries: [...] }.`};
+        console.error("[generateRcmAction] AI flow returned unexpected data structure. Expected { rcmEntries: [...] }, received:", result);
+        return { error: `${RCM_ERROR_PREFIX}AI flow returned an unexpected data structure. Check server logs for details.`};
     }
 
   } catch (e: unknown) {
-    // Enhanced catch block for better diagnostics
+    let errorMessage = `${RCM_ERROR_PREFIX}An unexpected error occurred.`;
     if (e instanceof Error) {
       console.error("[generateRcmAction] Caught Error Name:", e.name);
       console.error("[generateRcmAction] Caught Error Message:", e.message);
       console.error("[generateRcmAction] Caught Error Stack:", e.stack);
-      return { error: `${RCM_ERROR_PREFIX}${e.message}` };
+      errorMessage = `${RCM_ERROR_PREFIX}${e.message}`;
     } else if (typeof e === 'string') {
       console.error("[generateRcmAction] Caught string error:", e);
-      return { error: `${RCM_ERROR_PREFIX}${e}` };
+      errorMessage = `${RCM_ERROR_PREFIX}${e}`;
     } else {
       console.error("[generateRcmAction] Caught unknown error type. Value:", e);
       try {
-        // Attempt to stringify, but be cautious of large objects or circular refs
         const stringifiedError = JSON.stringify(e);
         const truncatedError = stringifiedError.length > 300 ? stringifiedError.substring(0, 300) + "..." : stringifiedError;
-        return { error: `${RCM_ERROR_PREFIX}An unexpected error occurred. Details: ${truncatedError}`};
+        errorMessage = `${RCM_ERROR_PREFIX}An unexpected error occurred. Details: ${truncatedError}`;
       } catch (stringifyError) {
         console.error("[generateRcmAction] Failed to stringify unknown error:", stringifyError);
-        return { error: `${RCM_ERROR_PREFIX}An unexpected and unstringifiable error occurred.` };
+        errorMessage = `${RCM_ERROR_PREFIX}An unexpected and unstringifiable error occurred.`;
       }
     }
+    return { error: errorMessage };
   }
 }
