@@ -8,19 +8,31 @@ import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type Ge
 
 
 // Helper function to extract text from Data URI
-// IMPORTANT: This is a basic implementation. PDF/DOCX parsing requires dedicated libraries.
 async function extractTextFromDataUri(dataUri: string): Promise<string> {
+  if (!dataUri || typeof dataUri !== 'string') {
+    throw new Error('Invalid Data URI: input is null, undefined, or not a string.');
+  }
+
   const parts = dataUri.split(',');
-  if (parts.length < 2) throw new Error('Invalid Data URI format.');
-  
+  if (parts.length < 2) {
+    console.error("Invalid Data URI format. URI (first 100 chars):", dataUri.substring(0,100));
+    throw new Error('Invalid Data URI format: does not contain a comma to separate metadata and data.');
+  }
+
   const meta = parts[0]; // e.g., "data:text/plain;base64"
   const base64Data = parts[1];
 
-  const mimeTypeMatch = meta.match(/data:(.*);base64/);
+  // Regex to ensure the meta part is "data:<mimetype>;base64"
+  const mimeTypeMatch = meta.match(/^data:(.+);base64$/);
   if (!mimeTypeMatch || !mimeTypeMatch[1]) {
-    throw new Error('Could not determine MIME type from Data URI.');
+    console.error("Could not determine MIME type or base64 encoding from Data URI. Meta part:", meta);
+    throw new Error('Could not determine MIME type or base64 encoding from Data URI. Expected format "data:<mimetype>;base64".');
   }
   const mimeType = mimeTypeMatch[1];
+
+  if (base64Data === undefined || base64Data === null) { // Check if base64Data is present
+      throw new Error('Invalid Data URI: Base64 data part is missing.');
+  }
 
   try {
     const buffer = Buffer.from(base64Data, 'base64');
@@ -28,19 +40,15 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
     if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else if (mimeType === 'application/pdf' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
-      // TODO: Implement proper PDF and DOCX text extraction using libraries like 'pdf-parse' for PDFs
-      // and 'mammoth' for DOCX. This is a complex task not covered by this basic implementation.
-      // For now, we throw an error to inform the user about this limitation.
       console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt file or enhance this function.`);
       throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt file for now. Advanced parsing for this file type needs to be added.`);
     } else {
-      // For other binary types or unknown text types, attempt a UTF-8 decode, but it may not be meaningful.
       console.warn(`Attempting UTF-8 decoding for unsupported MIME type: ${mimeType}. Results may vary.`);
       return buffer.toString('utf-8'); // Fallback, might produce gibberish for binary files
     }
-  } catch (error) {
-    console.error("Error processing Data URI:", error);
-    throw new Error("Failed to process document content from Data URI.");
+  } catch (error: any) {
+    console.error(`Error decoding Base64 content for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
+    throw new Error(`Failed to decode Base64 content or convert to buffer for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${error.message}`);
   }
 }
 
@@ -113,3 +121,4 @@ export async function generateRcmAction(
     return { error: error.message || "An unknown error occurred while generating the RCM." };
   }
 }
+
