@@ -1,8 +1,47 @@
 
 "use server";
 
-import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput, type RcmEntry } from "@/ai/flows/generate-risk-control-matrix";
+
 // pdf-parse is dynamically imported below
+
+const MAX_CHUNK_CHARS = 6000; // Max characters for a paragraph before attempting sentence splitting
+
+// Helper function to split text into manageable chunks (clauses/paragraphs)
+function splitTextIntoChunks(text: string): string[] {
+  if (!text || text.trim() === "") {
+    return [];
+  }
+
+  const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 0);
+  const chunks: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.length <= MAX_CHUNK_CHARS) {
+      chunks.push(paragraph);
+    } else {
+      // Paragraph is too long, try to split by sentences
+      // Basic sentence splitting, may not be perfect for all cases.
+      const sentences = paragraph.match(/[^.!?]+[.!?]*\s*/g) || [paragraph]; // Fallback to whole paragraph if no sentences found
+      let currentSentenceChunk = "";
+      for (const sentence of sentences) {
+        const trimmedSentence = sentence.trim();
+        if (trimmedSentence.length === 0) continue;
+
+        if ((currentSentenceChunk + " " + trimmedSentence).length > MAX_CHUNK_CHARS && currentSentenceChunk.length > 0) {
+          chunks.push(currentSentenceChunk);
+          currentSentenceChunk = trimmedSentence;
+        } else {
+          currentSentenceChunk = currentSentenceChunk ? currentSentenceChunk + " " + trimmedSentence : trimmedSentence;
+        }
+      }
+      if (currentSentenceChunk.length > 0) {
+        chunks.push(currentSentenceChunk);
+      }
+    }
+  }
+  return chunks.filter(chunk => chunk.trim().length > 0);
+}
 
 
 // Helper function to extract text from Data URI
@@ -17,7 +56,7 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
     throw new Error('Invalid Data URI format: does not contain a comma to separate metadata and data.');
   }
 
-  const meta = parts[0]; // e.g., "data:text/plain;base64"
+  const meta = parts[0];
   const base64Data = parts[1];
 
   const mimeTypeMatch = meta.match(/^data:(.+);base64$/);
@@ -33,7 +72,6 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt or .pdf file, or enhance this function.`);
-    // Specific error for DOCX
     throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt or .pdf file for now. Advanced parsing for this file type needs to be added.`);
   }
 
@@ -46,7 +84,6 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
         throw new Error("The PDF file appears to be empty or its data is corrupted, as no content could be processed.");
       }
       try {
-        // Dynamically import pdf-parse here
         const pdf = (await import('pdf-parse')).default;
         const data = await pdf(buffer);
         if (!data || typeof data.text !== 'string') {
@@ -62,12 +99,10 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
     } else if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else {
-       // This case should ideally be caught earlier if not DOCX or PDF, but as a fallback:
        throw new Error(`Unsupported file type: ${mimeType}. Please use .txt or .pdf files.`);
     }
   } catch (error: any) {
     console.error(`Error in extractTextFromDataUri for MIME type "${mimeType}". Error:`, error.message, error.stack);
-    // Re-throw specific errors if they were already well-formed
     if (error.message.startsWith("Failed to parse PDF content") || 
         error.message.startsWith("Direct text extraction for") ||
         error.message.startsWith("The PDF file appears to be empty") ||
@@ -75,7 +110,6 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
         error.message.startsWith("PDF parsing did not return the expected text structure")) {
         throw error; 
     }
-    // Fallback for other errors during buffer conversion or text decoding
     throw new Error(`Failed to process document content for MIME type "${mimeType}". This might be due to invalid characters or encoding. Original error: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
@@ -213,31 +247,77 @@ export async function generateRcmAction(
   }
 
   try {
-    const documentText = await extractTextFromDataUri(params.documentDataUri);
+    const fullDocumentText = await extractTextFromDataUri(params.documentDataUri);
 
-    if (!documentText || documentText.trim() === "") {
+    if (!fullDocumentText || fullDocumentText.trim() === "") {
         return { error: `${RCM_ERROR_PREFIX}Extracted document text is empty. Cannot proceed with RCM generation. The document might be empty, not parseable, or contain no extractable text.` };
     }
 
-    const input: GenerateRiskControlMatrixInput = {
-      documentText: documentText,
-      apiKey: params.openRouterApiKey,
-      modelName: params.modelName,
-    };
-
-    const result = await generateRiskControlMatrix(input);
+    const clauses = splitTextIntoChunks(fullDocumentText);
+    if (clauses.length === 0) {
+      return { error: `${RCM_ERROR_PREFIX}No processable clauses found in the document after splitting. The document might be too short or lack recognizable structure.` };
+    }
     
-    if (!result) { // Check if result itself is null or undefined
-        console.error("[generateRcmAction] AI flow returned a null or undefined result.");
-        return { error: `${RCM_ERROR_PREFIX}AI flow returned no result. Check server logs for details.`};
+    console.log(`[generateRcmAction] Document split into ${clauses.length} clauses/chunks for processing.`);
+
+    const allRcmEntries: RcmEntry[] = [];
+    let chunkIndex = 0;
+
+    for (const clauseText of clauses) {
+      chunkIndex++;
+      const clauseId = `C${String(chunkIndex).padStart(3, '0')}`;
+      console.log(`[generateRcmAction] Processing clause ${clauseId} of ${clauses.length}...`);
+
+      try {
+        const inputForClause: GenerateRiskControlMatrixInput = {
+          clauseText: clauseText,
+          clauseId: clauseId,
+          apiKey: params.openRouterApiKey,
+          modelName: params.modelName,
+        };
+        
+        const resultForClause = await generateRiskControlMatrix(inputForClause);
+
+        if (!resultForClause) {
+            throw new Error(`AI flow returned no result for clause ${clauseId}.`);
+        }
+        if (resultForClause.rcmEntries) {
+          // Ensure the AI output for policyClauseId and policyClauseText is used,
+          // as the AI might have slightly modified text or used its own ID temporarily.
+          // However, our prompt now strongly guides it to use the provided ones.
+          resultForClause.rcmEntries.forEach(entry => {
+            // If AI didn't use the provided clauseId, we can override it here if strict consistency is needed.
+            // entry.policyClauseId = clauseId; 
+            // Similar for entry.policyClauseText = clauseText; if needed, but this might discard AI's nuances.
+            allRcmEntries.push(entry);
+          });
+          console.log(`[generateRcmAction] Successfully processed clause ${clauseId}. ${resultForClause.rcmEntries.length} RCM entries added.`);
+        } else {
+           // This case should be less likely if the flow always returns {rcmEntries: []} on no-ops
+           console.warn(`[generateRcmAction] Clause ${clauseId} processed but returned no rcmEntries array in the result.`);
+        }
+
+      } catch (eClause: unknown) {
+        let clauseErrorMessage = `Error processing clause ${clauseId} ("${clauseText.substring(0,50)}..."): `;
+        if (eClause instanceof Error) {
+          clauseErrorMessage += eClause.message;
+        } else if (typeof eClause === 'string') {
+          clauseErrorMessage += eClause;
+        } else {
+          clauseErrorMessage += "An unknown error occurred for this clause.";
+        }
+        console.error(`[generateRcmAction] ${clauseErrorMessage}`, eClause);
+        throw new Error(`${RCM_ERROR_PREFIX}${clauseErrorMessage}`); // Propagate the error to stop further processing
+      }
+    }
+    
+    if (allRcmEntries.length === 0 && clauses.length > 0) {
+         console.warn("[generateRcmAction] All clauses processed, but no RCM entries were generated by the AI for any clause.");
+         // It's not necessarily an error if AI genuinely finds nothing, but good to note.
+         // We can let it return { data: { rcmEntries: [] } } in this case.
     }
 
-    if (result && Array.isArray(result.rcmEntries)) {
-        return { data: result };
-    } else {
-        console.error("[generateRcmAction] AI flow returned unexpected data structure. Expected { rcmEntries: [...] }, received:", result);
-        return { error: `${RCM_ERROR_PREFIX}AI flow returned an unexpected data structure. Check server logs for details.`};
-    }
+    return { data: { rcmEntries: allRcmEntries } };
 
   } catch (e: unknown) {
     let errorMessage = `${RCM_ERROR_PREFIX}An unexpected error occurred.`;
@@ -245,7 +325,8 @@ export async function generateRcmAction(
       console.error("[generateRcmAction] Caught Error Name:", e.name);
       console.error("[generateRcmAction] Caught Error Message:", e.message);
       console.error("[generateRcmAction] Caught Error Stack:", e.stack);
-      errorMessage = `${RCM_ERROR_PREFIX}${e.message}`;
+      // If the error message already has the prefix (from clause processing error), don't add it again.
+      errorMessage = e.message.startsWith(RCM_ERROR_PREFIX) ? e.message : `${RCM_ERROR_PREFIX}${e.message}`;
     } else if (typeof e === 'string') {
       console.error("[generateRcmAction] Caught string error:", e);
       errorMessage = `${RCM_ERROR_PREFIX}${e}`;
@@ -263,4 +344,3 @@ export async function generateRcmAction(
     return { error: errorMessage };
   }
 }
-

@@ -151,22 +151,22 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       const documentDataUri = await fileToDataURL(file);
 
       setProgress(40);
-      setStatusMessage(`Sending document to AI (${AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}) for analysis... This may take a few minutes.`);
+      const modelDisplayName = AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel;
+      setStatusMessage(`Sending document to AI (${modelDisplayName}) for analysis. This may take several minutes for large documents as it's processed in chunks...`);
 
       const { generateRcmAction } = await import("@/app/actions");
       let currentProgress = 40;
       const progressInterval = setInterval(() => {
-        currentProgress = Math.min(currentProgress + 2, 95); 
+        currentProgress = Math.min(currentProgress + 1, 98); // Slowly increment, but don't hit 100 until done
         setProgress(currentProgress);
-      }, 1500); 
+      }, 2500); // Slower interval as chunk processing can take time
 
       const result = await generateRcmAction({ documentDataUri, openRouterApiKey, modelName: selectedModel });
       clearInterval(progressInterval);
 
       if (!result) {
-        // This case should ideally be caught by more specific error handling below,
-        // but as a fallback if the server action returns nothing.
-        throw new Error("Server action did not return a recognizable response. The server might have crashed.");
+        console.error("FileUploadSection: handleSubmit received null or undefined result from server action.");
+        throw new Error("Server action did not return a recognizable response. The server might have encountered an issue.");
       }
 
       if (result.data) {
@@ -174,12 +174,11 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         setStatusMessage("Analysis complete!");
         onProcessingComplete(result.data, file.name);
       } else if (result.error) {
-        // If server action returned a structured error, use that message
+        console.error("FileUploadSection: handleSubmit received error from server action:", result.error);
         throw new Error(result.error);
       } else {
-        // Fallback if the result object is malformed (neither data nor error)
-        console.error("FileUploadSection: handleSubmit received malformed result from server action:", result);
-        throw new Error("Server action returned an invalid response structure. Check client console for details.");
+        console.error("FileUploadSection: handleSubmit received malformed result from server action (no data or error field):", result);
+        throw new Error("Server action returned an invalid response structure. Please check server logs and client console for details.");
       }
     } catch (err: any) {
       setProgress(0); 
@@ -187,7 +186,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       console.error("FileUploadSection: handleSubmit error received by client (raw error object):", err);
       console.error("FileUploadSection: handleSubmit error message being set to state:", errorMessage);
       setError(errorMessage);
-      setStatusMessage("Processing failed. Please try again.");
+      setStatusMessage("Processing failed. Please try again or check the console for more details.");
     } finally {
       setIsLoading(false);
     }
@@ -201,8 +200,8 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
           Upload Policy Document
         </CardTitle>
         <CardDescription>
-          Upload your corporate policy (PDF, DOCX, or TXT - max 20MB).
-          Note: PDF/DOCX processing is limited; prefer TXT for best results currently.
+          Upload your corporate policy (PDF, TXT - max 20MB). DOCX is not currently supported.
+          Note: PDF processing is supported; prefer TXT for very large or complex PDFs.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -238,7 +237,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
                         </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                        <p>{modelTestError}</p>
+                        <p className="max-w-xs break-words">{modelTestError}</p>
                     </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
@@ -302,10 +301,10 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         {!openRouterApiKey && (
           <p className="text-sm text-center text-destructive">OpenRouter API Key is not set. Please validate your key first.</p>
         )}
-         {openRouterApiKey && !isModelVerified && selectedModel && !isTestingModel && (
+         {openRouterApiKey && !isModelVerified && selectedModel && !isTestingModel && modelTestError && (
           <p className="text-sm text-center text-destructive">
             The selected model ({AVAILABLE_MODELS.find(m=>m.id === selectedModel)?.name || selectedModel}) could not be verified with your API key.
-            {modelTestError ? ` Error: ${modelTestError}` : ""}
+            Error: {modelTestError}
           </p>
         )}
       </CardContent>
