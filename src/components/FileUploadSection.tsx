@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
 
 interface FileUploadSectionProps {
-  openRouterApiKey: string; // Needed if AI flow were to use it
+  openRouterApiKey: string; 
   onProcessingComplete: (data: GenerateRiskControlMatrixOutput, fileName: string) => void;
 }
 
@@ -22,7 +22,7 @@ const ACCEPTED_FILE_TYPES = {
   "text/plain": [".txt"],
 };
 
-export default function FileUploadSection({ onProcessingComplete }: FileUploadSectionProps) {
+export default function FileUploadSection({ openRouterApiKey, onProcessingComplete }: FileUploadSectionProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,6 +69,10 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
       setError("Please select a file first.");
       return;
     }
+    if (!openRouterApiKey) {
+      setError("OpenRouter API Key is missing. Please re-validate your API key.");
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -85,13 +89,17 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
 
       const { generateRcmAction } = await import("@/app/actions");
       // Simulate progress for AI processing
+      // This interval is a rough estimate; actual processing time varies.
+      let currentProgress = 40;
       const progressInterval = setInterval(() => {
-        setProgress(p => Math.min(p + 5, 95));
-      }, 1000);
+        currentProgress = Math.min(currentProgress + 2, 95); // Slower increment
+        setProgress(currentProgress);
+      }, 1500); // Longer interval
 
-
-      const result = await generateRcmAction({ documentDataUri });
-      clearInterval(progressInterval);
+      // Pass both documentDataUri and openRouterApiKey
+      const result = await generateRcmAction({ documentDataUri, openRouterApiKey });
+      
+      clearInterval(progressInterval); // Stop simulation
 
       if (result.data) {
         setProgress(100);
@@ -101,7 +109,7 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
         throw new Error(result.error || "Failed to process document.");
       }
     } catch (err: any) {
-      setProgress(0);
+      setProgress(0); // Reset progress on error
       console.error("Processing error:", err);
       setError(err.message || "An unexpected error occurred during processing.");
       setStatusMessage("Processing failed. Please try again.");
@@ -118,7 +126,8 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
             Upload Policy Document
         </CardTitle>
         <CardDescription>
-          Upload your corporate policy (PDF, DOCX, or TXT - max 20MB).
+          Upload your corporate policy (PDF, DOCX, or TXT - max 20MB). 
+          Note: PDF/DOCX processing is limited; prefer TXT for best results currently.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -142,7 +151,7 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
                <FileText className="h-5 w-5 text-primary" />
                <span className="text-sm font-medium">{file.name}</span>
              </div>
-             <Button variant="ghost" size="sm" onClick={() => { setFile(null); setStatusMessage("Drop your policy document here or click to select."); }}>
+             <Button variant="ghost" size="sm" onClick={() => { setFile(null); setStatusMessage("Drop your policy document here or click to select."); setError(null); }}>
                Remove
              </Button>
            </div>
@@ -163,7 +172,7 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
           </Alert>
         )}
 
-        <Button onClick={handleSubmit} disabled={!file || isLoading} className="w-full">
+        <Button onClick={handleSubmit} disabled={!file || isLoading || !openRouterApiKey} className="w-full">
           {isLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
@@ -171,7 +180,11 @@ export default function FileUploadSection({ onProcessingComplete }: FileUploadSe
           )}
           {isLoading ? "Processing..." : "Generate RCM"}
         </Button>
+         {!openRouterApiKey && (
+          <p className="text-sm text-center text-destructive">OpenRouter API Key is not set. Please validate your key first.</p>
+        )}
       </CardContent>
     </Card>
   );
 }
+

@@ -1,27 +1,27 @@
+
 // src/ai/flows/generate-risk-control-matrix.ts
 'use server';
 
 /**
- * @fileOverview Generates a Risk Control Matrix (RCM) from policy documents by extracting clauses,
- * mapping them to compliance standards, and generating descriptions of controls, risks, and audit tests.
+ * @fileOverview Generates a Risk Control Matrix (RCM) from policy document text using OpenRouter.
  *
  * - generateRiskControlMatrix - A function that orchestrates the RCM generation process.
- * - GenerateRiskControlMatrixInput - The input type for the generateRiskControlMatrix function, accepting a document data URI.
- * - GenerateRiskControlMatrixOutput - The return type for the generateRiskControlMatrix function, providing the RCM in JSON format.
+ * - GenerateRiskControlMatrixInput - The input type for the generateRiskControlMatrix function.
+ * - GenerateRiskControlMatrixOutput - The return type for the generateRiskControlMatrix function.
  */
 
-import {ai} from '@/ai/genkit';
-import {z} from 'genkit';
+import {z} from 'genkit'; // z is still useful for schema validation
 
+// Define input schema for the new structure
 const GenerateRiskControlMatrixInputSchema = z.object({
-  documentDataUri: z
+  documentText: z
     .string()
-    .describe(
-      "A policy document (PDF, DOCX, or TXT) as a data URI that must include a MIME type and use Base64 encoding. Expected format: 'data:<mimetype>;base64,<encoded_data>'."
-    ),
+    .describe('The full text content of the policy document.'),
+  apiKey: z.string().describe('The OpenRouter API key.'),
 });
 export type GenerateRiskControlMatrixInput = z.infer<typeof GenerateRiskControlMatrixInputSchema>;
 
+// RcmEntrySchema remains internal or could be defined in a shared types file if needed elsewhere
 const RcmEntrySchema = z.object({
   policyClauseId: z.string().describe('Unique identifier for the policy clause (e.g., C001).'),
   policyClauseText: z.string().describe('Verbatim text of the extracted policy clause.'),
@@ -36,56 +36,114 @@ const RcmEntrySchema = z.object({
   recommendedAction: z.string().describe('Recommended action to address the identified risk or control gap.'),
 });
 
+// OutputSchema is no longer exported directly
 const GenerateRiskControlMatrixOutputSchema = z.object({
   rcmEntries: z.array(RcmEntrySchema).describe('Array of Risk Control Matrix entries.'),
 });
 export type GenerateRiskControlMatrixOutput = z.infer<typeof GenerateRiskControlMatrixOutputSchema>;
 
+// Export RcmEntry type if needed by other components (e.g. RcmTable)
+export type RcmEntry = z.infer<typeof RcmEntrySchema>;
+
+
+// The main exported function that will be called by server actions
 export async function generateRiskControlMatrix(
   input: GenerateRiskControlMatrixInput
 ): Promise<GenerateRiskControlMatrixOutput> {
-  return generateRiskControlMatrixFlow(input);
+  // Validate input using Zod schema
+  const validatedInput = GenerateRiskControlMatrixInputSchema.parse(input);
+
+  const { documentText, apiKey } = validatedInput;
+  const openRouterModel = 'microsoft/mai-ds-r1:free'; // As specified by the user
+
+  // Construct the prompt manually for OpenRouter
+  // Note: The prompt no longer uses {{media url=...}} as we pass plain text.
+  const promptText = `You are an expert auditor tasked with generating a Risk Control Matrix (RCM) from policy documents.
+
+Analyze the provided policy document text, extract clauses, map them to relevant compliance standards (COSO, COBIT, ISO 27001, ISO 31000), 
+and generate descriptions of controls, risks, and audit tests.
+
+For each clause, create an RCM entry with the following fields:
+
+- policyClauseId: A unique identifier for the clause (e.g., C001).
+- policyClauseText: The verbatim text of the extracted policy clause.
+- controlFramework: The compliance framework to which the control maps (e.g., COSO, COBIT, ISO 27001, ISO 31000).
+- controlId: The identifier for the specific control within the chosen framework.
+- controlType: Classify the control type as Preventive, Detective, Corrective, or Directive.
+- mappingRationale: A one-sentence justification for the control mapping, citing the specific standard.
+- controlDescription: An actionable objective of the control.
+- riskRating: Assign a risk rating of High, Medium, or Low.
+- identifiedRisk: Describe the risk (cause -> nature -> impact).
+- auditTest: Propose an audit test to validate control effectiveness (data source, sampling, expected outcome).
+- recommendedAction: Recommend an action to address the identified risk or control gap.
+
+The policy document text is as follows:
+---
+${documentText}
+---
+
+Return the RCM in JSON format, ensuring the entire response is a single JSON object matching this structure:
+{ "rcmEntries": [ /* full entries including controlType */ ] }
+Do not include any explanatory text before or after the JSON object.
+`;
+
+  try {
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:9002', // Recommended by OpenRouter
+        'X-Title': 'Policy Compliance Analyzer', // Recommended by OpenRouter
+      },
+      body: JSON.stringify({
+        model: openRouterModel,
+        messages: [{ role: 'user', content: promptText }],
+        // To encourage JSON output, some models support a `response_format` parameter
+        // For example: response_format: { type: "json_object" }
+        // Check OpenRouter/model-specific documentation if this is supported for 'microsoft/mai-ds-r1:free'
+        // For now, we rely on the prompt instruction for JSON output.
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error('OpenRouter API Error:', response.status, errorBody);
+      throw new Error(`OpenRouter API request failed: ${response.status} - ${errorBody}`);
+    }
+
+    const result = await response.json();
+    
+    if (!result.choices || result.choices.length === 0 || !result.choices[0].message || !result.choices[0].message.content) {
+        console.error('Invalid response structure from OpenRouter:', result);
+        throw new Error('Received an invalid response structure from OpenRouter.');
+    }
+    
+    const assistantResponseText = result.choices[0].message.content;
+
+    // Attempt to parse the text response as JSON
+    let parsedJson;
+    try {
+        // Sometimes the LLM might wrap the JSON in backticks or add comments.
+        // Basic cleanup:
+        const cleanedResponseText = assistantResponseText.replace(/^```json\s*|```$/g, '').trim();
+        parsedJson = JSON.parse(cleanedResponseText);
+    } catch (e: any) {
+        console.error('Failed to parse JSON response from OpenRouter:', assistantResponseText, e);
+        throw new Error(`Failed to parse the AI's JSON response. Raw response: ${assistantResponseText}`);
+    }
+    
+    // Validate the parsed JSON against the Zod schema
+    const validatedOutput = GenerateRiskControlMatrixOutputSchema.parse(parsedJson);
+    return validatedOutput;
+
+  } catch (error: any) {
+    console.error('Error in generateRiskControlMatrix flow:', error);
+    throw new Error(`Failed to generate RCM via OpenRouter: ${error.message}`);
+  }
 }
 
-const rcmPrompt = ai.definePrompt({
-  name: 'rcmPrompt',
-  input: {schema: GenerateRiskControlMatrixInputSchema},
-  output: {schema: GenerateRiskControlMatrixOutputSchema},
-  prompt: `You are an expert auditor tasked with generating a Risk Control Matrix (RCM) from policy documents.
-
-  Analyze the provided policy document, extract clauses, map them to relevant compliance standards (COSO, COBIT, ISO 27001, ISO 31000), 
-  and generate descriptions of controls, risks, and audit tests.
-
-  For each clause, create an RCM entry with the following fields:
-
-  - policyClauseId: A unique identifier for the clause (e.g., C001).
-  - policyClauseText: The verbatim text of the extracted policy clause.
-  - controlFramework: The compliance framework to which the control maps (e.g., COSO, COBIT, ISO 27001, ISO 31000).
-  - controlId: The identifier for the specific control within the chosen framework.
-  - controlType: Classify the control type as Preventive, Detective, Corrective, or Directive.
-  - mappingRationale: A one-sentence justification for the control mapping, citing the specific standard.
-  - controlDescription: An actionable objective of the control.
-  - riskRating: Assign a risk rating of High, Medium, or Low.
-  - identifiedRisk: Describe the risk (cause -> nature -> impact).
-  - auditTest: Propose an audit test to validate control effectiveness (data source, sampling, expected outcome).
-  - recommendedAction: Recommend an action to address the identified risk or control gap.
-
-  The policy document is provided as a data URI:
-  {{media url=documentDataUri}}
-
-  Return the RCM in JSON format:
-  { "rcmEntries": [ /* full entries including controlType */ ] }
-  `,
-});
-
-const generateRiskControlMatrixFlow = ai.defineFlow(
-  {
-    name: 'generateRiskControlMatrixFlow',
-    inputSchema: GenerateRiskControlMatrixInputSchema,
-    outputSchema: GenerateRiskControlMatrixOutputSchema,
-  },
-  async input => {
-    const {output} = await rcmPrompt(input);
-    return output!;
-  }
-);
+// Note: The Genkit `ai.definePrompt` and `ai.defineFlow` are not used here
+// because we are making direct HTTP calls to OpenRouter.
+// If you need to integrate this back into a Genkit-managed flow with tracing,
+// you might explore custom Genkit tools or model definitions.
