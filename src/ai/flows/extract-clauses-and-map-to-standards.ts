@@ -76,7 +76,7 @@ Return the RCM in JSON format, ensuring the entire response is a single JSON obj
     // ... more entries
   ]
 }
-Do not include any explanatory text before or after the JSON object.`;
+Do not include any explanatory text, markdown formatting like \`\`\`json, or any other content before or after the JSON object. The response must be solely the JSON object.`;
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -88,22 +88,35 @@ Do not include any explanatory text before or after the JSON object.`;
         'X-Title': 'Policy Compliance Analyzer',
       },
       body: JSON.stringify({
-        model: modelName, // Use the dynamic modelName
+        model: modelName, 
         messages: [{ role: 'user', content: promptText }],
       }),
     });
 
     if (!response.ok) {
-      const errorBody = await response.text();
-      console.error('OpenRouter API Error:', response.status, errorBody);
-      throw new Error(`OpenRouter API request failed with model ${modelName}: ${response.status} - ${errorBody}`);
+      const errorBodyText = await response.text();
+      let detailedError = `OpenRouter API request failed with model ${modelName} (Status ${response.status})`;
+      try {
+        const parsedError = JSON.parse(errorBodyText);
+        if (parsedError && parsedError.error && parsedError.error.message) {
+          detailedError += `: ${parsedError.error.message}`;
+        } else if (parsedError && parsedError.message) {
+          detailedError += `: ${parsedError.message}`;
+        } else {
+          detailedError += `. Response: ${errorBodyText.substring(0, 500)}${errorBodyText.length > 500 ? "..." : ""}`;
+        }
+      } catch (e) {
+        detailedError += `. Raw Response: ${errorBodyText.substring(0, 500)}${errorBodyText.length > 500 ? "..." : ""}`;
+      }
+      console.error('OpenRouter API Error Full Response:', response.status, errorBodyText);
+      throw new Error(detailedError);
     }
 
     const result = await response.json();
 
     if (!result.choices || result.choices.length === 0 || !result.choices[0].message || !result.choices[0].message.content) {
         console.error('Invalid response structure from OpenRouter:', result);
-        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}.`);
+        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}. Check API logs.`);
     }
     
     const assistantResponseText = result.choices[0].message.content;
@@ -114,7 +127,8 @@ Do not include any explanatory text before or after the JSON object.`;
         parsedJson = JSON.parse(cleanedResponseText);
     } catch (e: any) {
         console.error('Failed to parse JSON response from OpenRouter:', assistantResponseText, e);
-        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. Raw response: ${assistantResponseText}`);
+        const snippet = assistantResponseText.substring(0, 200) + (assistantResponseText.length > 200 ? "..." : "");
+        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. The AI might have returned malformed JSON. Start of response: "${snippet}"`);
     }
 
     const validatedOutput = ExtractClausesAndMapToStandardsOutputSchema.parse(parsedJson);
@@ -122,6 +136,10 @@ Do not include any explanatory text before or after the JSON object.`;
 
   } catch (error: any) {
     console.error('Error in extractClausesAndMapToStandards flow:', error);
-    throw new Error(`Failed to extract clauses via OpenRouter with model ${modelName}: ${error.message}`);
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("OpenRouter API request failed") || message.startsWith("Failed to parse the AI's JSON response") || message.startsWith("Received an invalid response structure")) {
+        throw error;
+    }
+    throw new Error(`Failed to extract clauses via OpenRouter with model ${modelName}: ${message}`);
   }
 }
