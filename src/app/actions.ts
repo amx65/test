@@ -2,10 +2,6 @@
 "use server";
 
 import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
-// Note: ExtractClausesAndMapToStandardsOutput type might not be directly used here if generateRcmAction only uses generateRiskControlMatrix
-// However, if there was a combined flow or another action using it, its type would be imported similarly.
-// import type { ExtractClausesAndMapToStandardsOutput } from "@/ai/flows/extract-clauses-and-map-to-standards";
-
 
 // Helper function to extract text from Data URI
 async function extractTextFromDataUri(dataUri: string): Promise<string> {
@@ -33,9 +29,9 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
       throw new Error('Invalid Data URI: Base64 data part is missing.');
   }
 
-  // Check for unsupported types before attempting to process the buffer
   if (mimeType === 'application/pdf' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt file or enhance this function.`);
+    // This error will be caught by generateRcmAction and propagated to the UI.
     throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt file for now. Advanced parsing for this file type needs to be added.`);
   }
 
@@ -45,13 +41,12 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
     if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else {
-      // For any other types not explicitly handled as unsupported above, try to decode as UTF-8 with a warning.
       console.warn(`Attempting UTF-8 decoding for unsupported MIME type: ${mimeType}. Results may vary.`);
       return buffer.toString('utf-8'); 
     }
   } catch (error: any) {
-    // This catch block now primarily handles errors from Buffer.from or buffer.toString for text/plain or other fallback types
     console.error(`Error decoding Base64 content for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
+    // This error will be caught by generateRcmAction and propagated to the UI.
     throw new Error(`Failed to decode or process content for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${error.message}`);
   }
 }
@@ -62,9 +57,6 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
     return { isValid: false, error: "API Key cannot be empty." };
   }
   try {
-    // Using 'https://openrouter.ai/api/v1/auth/key' as a lightweight check,
-    // as per OpenRouter documentation for key validation.
-    // The /models endpoint can be large and slow.
     const response = await fetch('https://openrouter.ai/api/v1/auth/key', {
       method: 'GET',
       headers: {
@@ -75,11 +67,9 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
     });
 
     if (response.ok) {
-      // A 200 OK from /auth/key implies the key is valid and has some credit/rate limit.
       return { isValid: true };
     } else {
       const errorText = await response.text();
-      // OpenRouter returns 401 for invalid keys for /auth/key endpoint.
       if (response.status === 401) {
          try {
             const errorData = JSON.parse(errorText);
@@ -88,7 +78,6 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
             return { isValid: false, error: `Invalid API Key (Unauthorized). Server response: ${errorText}`.trim() };
         }
       }
-      // For other errors from /auth/key
       return { isValid: false, error: `API Key validation failed (status: ${response.status}). Response: ${errorText}`.trim() };
     }
   } catch (error: any) {
@@ -98,13 +87,16 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
 }
 
 export async function generateRcmAction(
-  params: { documentDataUri: string; openRouterApiKey: string; }
+  params: { documentDataUri: string; openRouterApiKey: string; modelName: string; }
 ): Promise<{ data?: GenerateRiskControlMatrixOutput; error?: string }> {
   if (!params.openRouterApiKey) {
     return { error: "OpenRouter API Key is missing." };
   }
   if (!params.documentDataUri) {
     return { error: "Document data is missing." };
+  }
+  if (!params.modelName) {
+    return { error: "AI Model name is missing." };
   }
 
   try {
@@ -113,16 +105,14 @@ export async function generateRcmAction(
     const input: GenerateRiskControlMatrixInput = {
       documentText: documentText,
       apiKey: params.openRouterApiKey,
+      modelName: params.modelName,
     };
     
-    // Assuming generateRiskControlMatrix is the primary flow to call.
-    // If extractClausesAndMapToStandards was meant to be called first, or in conjunction,
-    // this logic would need to be adjusted.
     const result = await generateRiskControlMatrix(input);
     return { data: result };
   } catch (error: any) {
     console.error("Error generating RCM:", error);
+    // Return the specific error message from extractTextFromDataUri or generateRiskControlMatrix
     return { error: error.message || "An unknown error occurred while generating the RCM." };
   }
 }
-

@@ -6,9 +6,17 @@ import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { UploadCloud, FileText, Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { UploadCloud, FileText, Loader2, AlertCircle, CheckCircle, BrainCircuit } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 interface FileUploadSectionProps {
   openRouterApiKey: string; 
@@ -22,12 +30,19 @@ const ACCEPTED_FILE_TYPES = {
   "text/plain": [".txt"],
 };
 
+const AVAILABLE_MODELS = [
+  { id: "deepseek/deepseek-chat-v3-0324:free", name: "DeepSeek V3 0324 (Free)" },
+  { id: "microsoft/mai-ds-r1:free", name: "Microsoft MAI DS R1 (Free)" },
+  // Add more models here as needed
+];
+
 export default function FileUploadSection({ openRouterApiKey, onProcessingComplete }: FileUploadSectionProps) {
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [statusMessage, setStatusMessage] = useState("Drop your policy document here or click to select.");
+  const [selectedModel, setSelectedModel] = useState<string>(AVAILABLE_MODELS[0].id);
 
   const fileToDataURL = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -73,6 +88,10 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       setError("OpenRouter API Key is missing. Please re-validate your API key.");
       return;
     }
+    if (!selectedModel) {
+      setError("Please select an AI model.");
+      return;
+    }
 
     setIsLoading(true);
     setError(null);
@@ -85,21 +104,18 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       const documentDataUri = await fileToDataURL(file);
       
       setProgress(40);
-      setStatusMessage("Sending document to AI for analysis... This may take a few minutes.");
+      setStatusMessage(`Sending document to AI (${AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel}) for analysis... This may take a few minutes.`);
 
       const { generateRcmAction } = await import("@/app/actions");
-      // Simulate progress for AI processing
-      // This interval is a rough estimate; actual processing time varies.
       let currentProgress = 40;
       const progressInterval = setInterval(() => {
-        currentProgress = Math.min(currentProgress + 2, 95); // Slower increment
+        currentProgress = Math.min(currentProgress + 2, 95);
         setProgress(currentProgress);
-      }, 1500); // Longer interval
+      }, 1500);
 
-      // Pass both documentDataUri and openRouterApiKey
-      const result = await generateRcmAction({ documentDataUri, openRouterApiKey });
+      const result = await generateRcmAction({ documentDataUri, openRouterApiKey, modelName: selectedModel });
       
-      clearInterval(progressInterval); // Stop simulation
+      clearInterval(progressInterval);
 
       if (result.data) {
         setProgress(100);
@@ -109,7 +125,7 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         throw new Error(result.error || "Failed to process document.");
       }
     } catch (err: any) {
-      setProgress(0); // Reset progress on error
+      setProgress(0);
       console.error("Processing error:", err);
       setError(err.message || "An unexpected error occurred during processing.");
       setStatusMessage("Processing failed. Please try again.");
@@ -131,6 +147,25 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        <div className="space-y-2">
+            <Label htmlFor="model-select" className="flex items-center gap-1">
+                <BrainCircuit className="h-4 w-4" />
+                Select AI Model
+            </Label>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+            <SelectTrigger id="model-select" className="w-full">
+                <SelectValue placeholder="Choose an AI model" />
+            </SelectTrigger>
+            <SelectContent>
+                {AVAILABLE_MODELS.map((model) => (
+                <SelectItem key={model.id} value={model.id}>
+                    {model.name}
+                </SelectItem>
+                ))}
+            </SelectContent>
+            </Select>
+        </div>
+
         <div
           {...getRootProps()}
           className={`p-8 border-2 border-dashed rounded-md cursor-pointer transition-colors
@@ -167,12 +202,12 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         {error && (
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
-            <AlertTitle>Upload Error</AlertTitle>
+            <AlertTitle>Processing Error</AlertTitle>
             <AlertDescription>{error}</AlertDescription>
           </Alert>
         )}
 
-        <Button onClick={handleSubmit} disabled={!file || isLoading || !openRouterApiKey} className="w-full">
+        <Button onClick={handleSubmit} disabled={!file || isLoading || !openRouterApiKey || !selectedModel} className="w-full">
           {isLoading ? (
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
@@ -187,4 +222,3 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
     </Card>
   );
 }
-

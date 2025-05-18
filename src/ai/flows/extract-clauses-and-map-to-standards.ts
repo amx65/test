@@ -16,6 +16,7 @@ const ExtractClausesAndMapToStandardsInputSchema = z.object({
     .string()
     .describe('The full text content of the policy document.'),
   apiKey: z.string().describe('The OpenRouter API key.'),
+  modelName: z.string().describe('The OpenRouter model name to use (e.g., deepseek/deepseek-chat-v3-0324:free).'),
 });
 export type ExtractClausesAndMapToStandardsInput = z.infer<typeof ExtractClausesAndMapToStandardsInputSchema>;
 
@@ -43,8 +44,7 @@ export async function extractClausesAndMapToStandards(
   input: ExtractClausesAndMapToStandardsInput
 ): Promise<ExtractClausesAndMapToStandardsOutput> {
   const validatedInput = ExtractClausesAndMapToStandardsInputSchema.parse(input);
-  const { documentText, apiKey } = validatedInput;
-  const openRouterModel = 'microsoft/mai-ds-r1:free';
+  const { documentText, apiKey, modelName } = validatedInput;
 
   const promptText = `You are an expert compliance officer.
 
@@ -88,7 +88,7 @@ Do not include any explanatory text before or after the JSON object.`;
         'X-Title': 'Policy Compliance Analyzer',
       },
       body: JSON.stringify({
-        model: openRouterModel,
+        model: modelName, // Use the dynamic modelName
         messages: [{ role: 'user', content: promptText }],
       }),
     });
@@ -96,14 +96,14 @@ Do not include any explanatory text before or after the JSON object.`;
     if (!response.ok) {
       const errorBody = await response.text();
       console.error('OpenRouter API Error:', response.status, errorBody);
-      throw new Error(`OpenRouter API request failed: ${response.status} - ${errorBody}`);
+      throw new Error(`OpenRouter API request failed with model ${modelName}: ${response.status} - ${errorBody}`);
     }
 
     const result = await response.json();
 
     if (!result.choices || result.choices.length === 0 || !result.choices[0].message || !result.choices[0].message.content) {
         console.error('Invalid response structure from OpenRouter:', result);
-        throw new Error('Received an invalid response structure from OpenRouter.');
+        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}.`);
     }
     
     const assistantResponseText = result.choices[0].message.content;
@@ -114,7 +114,7 @@ Do not include any explanatory text before or after the JSON object.`;
         parsedJson = JSON.parse(cleanedResponseText);
     } catch (e: any) {
         console.error('Failed to parse JSON response from OpenRouter:', assistantResponseText, e);
-        throw new Error(`Failed to parse the AI's JSON response. Raw response: ${assistantResponseText}`);
+        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. Raw response: ${assistantResponseText}`);
     }
 
     const validatedOutput = ExtractClausesAndMapToStandardsOutputSchema.parse(parsedJson);
@@ -122,9 +122,6 @@ Do not include any explanatory text before or after the JSON object.`;
 
   } catch (error: any) {
     console.error('Error in extractClausesAndMapToStandards flow:', error);
-    throw new Error(`Failed to extract clauses via OpenRouter: ${error.message}`);
+    throw new Error(`Failed to extract clauses via OpenRouter with model ${modelName}: ${error.message}`);
   }
 }
-
-// Note: This flow has been refactored to call OpenRouter directly.
-// The original Genkit `ai.definePrompt` and `ai.defineFlow` are not used for this specific OpenRouter integration.

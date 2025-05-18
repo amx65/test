@@ -10,7 +10,7 @@
  * - GenerateRiskControlMatrixOutput - The return type for the generateRiskControlMatrix function.
  */
 
-import {z} from 'genkit'; // z is still useful for schema validation
+import {z} from 'genkit';
 
 // Define input schema for the new structure
 const GenerateRiskControlMatrixInputSchema = z.object({
@@ -18,10 +18,11 @@ const GenerateRiskControlMatrixInputSchema = z.object({
     .string()
     .describe('The full text content of the policy document.'),
   apiKey: z.string().describe('The OpenRouter API key.'),
+  modelName: z.string().describe('The OpenRouter model name to use (e.g., deepseek/deepseek-chat-v3-0324:free).'),
 });
 export type GenerateRiskControlMatrixInput = z.infer<typeof GenerateRiskControlMatrixInputSchema>;
 
-// RcmEntrySchema remains internal or could be defined in a shared types file if needed elsewhere
+// RcmEntrySchema remains internal
 const RcmEntrySchema = z.object({
   policyClauseId: z.string().describe('Unique identifier for the policy clause (e.g., C001).'),
   policyClauseText: z.string().describe('Verbatim text of the extracted policy clause.'),
@@ -53,11 +54,8 @@ export async function generateRiskControlMatrix(
   // Validate input using Zod schema
   const validatedInput = GenerateRiskControlMatrixInputSchema.parse(input);
 
-  const { documentText, apiKey } = validatedInput;
-  const openRouterModel = 'microsoft/mai-ds-r1:free'; // As specified by the user
+  const { documentText, apiKey, modelName } = validatedInput;
 
-  // Construct the prompt manually for OpenRouter
-  // Note: The prompt no longer uses {{media url=...}} as we pass plain text.
   const promptText = `You are an expert auditor tasked with generating a Risk Control Matrix (RCM) from policy documents.
 
 Analyze the provided policy document text, extract clauses, map them to relevant compliance standards (COSO, COBIT, ISO 27001, ISO 31000), 
@@ -93,57 +91,44 @@ Do not include any explanatory text before or after the JSON object.
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:9002', // Recommended by OpenRouter
-        'X-Title': 'Policy Compliance Analyzer', // Recommended by OpenRouter
+        'HTTP-Referer': process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:9002',
+        'X-Title': 'Policy Compliance Analyzer',
       },
       body: JSON.stringify({
-        model: openRouterModel,
+        model: modelName, // Use the dynamic modelName
         messages: [{ role: 'user', content: promptText }],
-        // To encourage JSON output, some models support a `response_format` parameter
-        // For example: response_format: { type: "json_object" }
-        // Check OpenRouter/model-specific documentation if this is supported for 'microsoft/mai-ds-r1:free'
-        // For now, we rely on the prompt instruction for JSON output.
       }),
     });
 
     if (!response.ok) {
       const errorBody = await response.text();
       console.error('OpenRouter API Error:', response.status, errorBody);
-      throw new Error(`OpenRouter API request failed: ${response.status} - ${errorBody}`);
+      throw new Error(`OpenRouter API request failed with model ${modelName}: ${response.status} - ${errorBody}`);
     }
 
     const result = await response.json();
     
     if (!result.choices || result.choices.length === 0 || !result.choices[0].message || !result.choices[0].message.content) {
         console.error('Invalid response structure from OpenRouter:', result);
-        throw new Error('Received an invalid response structure from OpenRouter.');
+        throw new Error(`Received an invalid response structure from OpenRouter with model ${modelName}.`);
     }
     
     const assistantResponseText = result.choices[0].message.content;
 
-    // Attempt to parse the text response as JSON
     let parsedJson;
     try {
-        // Sometimes the LLM might wrap the JSON in backticks or add comments.
-        // Basic cleanup:
         const cleanedResponseText = assistantResponseText.replace(/^```json\s*|```$/g, '').trim();
         parsedJson = JSON.parse(cleanedResponseText);
     } catch (e: any) {
         console.error('Failed to parse JSON response from OpenRouter:', assistantResponseText, e);
-        throw new Error(`Failed to parse the AI's JSON response. Raw response: ${assistantResponseText}`);
+        throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. Raw response: ${assistantResponseText}`);
     }
     
-    // Validate the parsed JSON against the Zod schema
     const validatedOutput = GenerateRiskControlMatrixOutputSchema.parse(parsedJson);
     return validatedOutput;
 
   } catch (error: any) {
     console.error('Error in generateRiskControlMatrix flow:', error);
-    throw new Error(`Failed to generate RCM via OpenRouter: ${error.message}`);
+    throw new Error(`Failed to generate RCM via OpenRouter with model ${modelName}: ${error.message}`);
   }
 }
-
-// Note: The Genkit `ai.definePrompt` and `ai.defineFlow` are not used here
-// because we are making direct HTTP calls to OpenRouter.
-// If you need to integrate this back into a Genkit-managed flow with tracing,
-// you might explore custom Genkit tools or model definitions.
