@@ -8,7 +8,8 @@ import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { UploadCloud, FileText, Loader2, AlertCircle, CheckCircle, BrainCircuit, XCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import type { GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+// Changed import to ExtractClausesAndMapToStandardsOutput
+import type { ExtractClausesAndMapToStandardsOutput } from "@/ai/flows/extract-clauses-and-map-to-standards";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -22,7 +23,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 
 interface FileUploadSectionProps {
   openRouterApiKey: string;
-  onProcessingComplete: (data: GenerateRiskControlMatrixOutput, fileName: string) => void;
+  onProcessingComplete: (data: ExtractClausesAndMapToStandardsOutput, fileName: string) => void; // Updated type
 }
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024; // 20 MB
@@ -152,14 +153,14 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
 
       setProgress(40);
       const modelDisplayName = AVAILABLE_MODELS.find(m => m.id === selectedModel)?.name || selectedModel;
-      setStatusMessage(`Sending document to AI (${modelDisplayName}) for analysis. This may take several minutes for large documents as it's processed in chunks...`);
+      setStatusMessage(`Sending document to AI (${modelDisplayName}) for analysis. This may take several minutes for large documents...`);
 
       const { generateRcmAction } = await import("@/app/actions");
       let currentProgress = 40;
       const progressInterval = setInterval(() => {
-        currentProgress = Math.min(currentProgress + 1, 98); // Slowly increment, but don't hit 100 until done
+        currentProgress = Math.min(currentProgress + 1, 98); 
         setProgress(currentProgress);
-      }, 2500); // Slower interval as chunk processing can take time
+      }, 2500); 
 
       const result = await generateRcmAction({ documentDataUri, openRouterApiKey, modelName: selectedModel });
       clearInterval(progressInterval);
@@ -180,9 +181,14 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         console.error("FileUploadSection: handleSubmit received malformed result from server action (no data or error field):", result);
         throw new Error("Server action returned an invalid response structure. Please check server logs and client console for details.");
       }
-    } catch (err: any) {
+    } catch (err: unknown) { // Changed to unknown for better type safety
       setProgress(0); 
-      const errorMessage = err.message || "An unexpected client-side error occurred during processing.";
+      let errorMessage = "An unexpected client-side error occurred during processing.";
+      if (err instanceof Error) {
+        errorMessage = err.message;
+      } else if (typeof err === 'string') {
+        errorMessage = err;
+      }
       console.error("FileUploadSection: handleSubmit error received by client (raw error object):", err);
       console.error("FileUploadSection: handleSubmit error message being set to state:", errorMessage);
       setError(errorMessage);
@@ -311,4 +317,4 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
     </Card>
   );
 }
-    
+

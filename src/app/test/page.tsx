@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { generateRcmAction } from "@/app/actions";
-import type { GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+// Changed import to ExtractClausesAndMapToStandardsOutput
+import type { ExtractClausesAndMapToStandardsOutput } from "@/ai/flows/extract-clauses-and-map-to-standards";
 
 const MOCK_DOCUMENT_TEXT = "This is a test policy. All employees must wear hats on Tuesdays. Data must be protected.";
 const MOCK_MODEL_NAME = "deepseek/deepseek-chat-v3-0324:free";
@@ -21,7 +22,7 @@ function createTextDataUri(text: string): string {
 
 export default function TestPage() {
   const [apiKey, setApiKey] = useState<string>("");
-  const [response, setResponse] = useState<GenerateRiskControlMatrixOutput | null>(null);
+  const [response, setResponse] = useState<ExtractClausesAndMapToStandardsOutput | null>(null); // Updated type
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -80,6 +81,8 @@ export default function TestPage() {
             "<em>{MOCK_DOCUMENT_TEXT}</em>"
             <br />
             and model: <strong>{MOCK_MODEL_NAME}</strong>.
+            <br/>
+            It will now use the full document processing logic.
           </p>
           <div className="space-y-2">
             <Label htmlFor="apiKey">OpenRouter API Key</Label>
@@ -125,3 +128,4 @@ export default function TestPage() {
     </div>
   );
 }
+

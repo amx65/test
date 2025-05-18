@@ -1,7 +1,8 @@
 
 "use client";
 
-import type { GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+// Changed import to ExtractClausesAndMapToStandardsOutput
+import type { ExtractClausesAndMapToStandardsOutput } from "@/ai/flows/extract-clauses-and-map-to-standards";
 import RcmTable from "./RcmTable";
 import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
@@ -9,8 +10,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { exportRcmToCsv, exportRcmToExcel } from "@/lib/exportUtils";
 
 interface RcmDisplaySectionProps {
-  rcmData: GenerateRiskControlMatrixOutput;
-  fileName: string; // Original uploaded file name, for export naming
+  rcmData: ExtractClausesAndMapToStandardsOutput; // Updated type
+  fileName: string; 
   onReset: () => void;
 }
 
@@ -56,3 +57,4 @@ export default function RcmDisplaySection({ rcmData, fileName, onReset }: RcmDis
     </Card>
   );
 }
+
