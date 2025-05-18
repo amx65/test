@@ -10,7 +10,7 @@
  * - GenerateRiskControlMatrixOutput - The return type for the generateRiskControlMatrix function.
  */
 
-import {z} from 'genkit';
+import {z, ZodError} from 'genkit';
 
 // Define input schema for the new structure
 const GenerateRiskControlMatrixInputSchema = z.object({
@@ -99,7 +99,6 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
       body: JSON.stringify({
         model: modelName, 
         messages: [{ role: 'user', content: promptText }],
-        // Ensure response is JSON
         response_format: { type: "json_object" }, 
       }),
     });
@@ -117,7 +116,6 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
           detailedError += `. Response: ${errorBodyText.substring(0, 500)}${errorBodyText.length > 500 ? "..." : ""}`;
         }
       } catch (e) {
-        // Not JSON or different structure, use truncated text
         detailedError += `. Raw Response: ${errorBodyText.substring(0, 500)}${errorBodyText.length > 500 ? "..." : ""}`;
       }
       console.error('OpenRouter API Error Full Response:', response.status, errorBodyText);
@@ -139,7 +137,6 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
 
     let parsedJson;
     try {
-        // Attempt to remove markdown code block fences if present, though the prompt now explicitly forbids it
         const cleanedResponseText = assistantResponseText.replace(/^```json\s*|```$/g, '').trim();
         if (cleanedResponseText === "") {
             throw new Error("AI returned an empty string after cleaning markdown.");
@@ -151,20 +148,27 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
         throw new Error(`Failed to parse the AI's JSON response with model ${modelName}. The AI might have returned malformed JSON or included extra text. Start of response: "${snippet}". Original parsing error: ${e.message}`);
     }
     
-    // Validate the parsed JSON against the Zod schema
     const validatedOutput = GenerateRiskControlMatrixOutputSchema.parse(parsedJson);
     return validatedOutput;
 
   } catch (error: any) {
-    console.error('Error in generateRiskControlMatrix flow:', error.name, error.message, error.stack);
-    const message = error instanceof Error ? error.message : String(error);
-    // Avoid re-wrapping if it's already a specific error from above
-    if (message.startsWith("OpenRouter API request failed") || 
-        message.startsWith("Failed to parse the AI's JSON response") || 
-        message.startsWith("Received an invalid response structure") ||
-        message.startsWith("Received empty or non-string content")) {
-        throw error;
+    console.error(`Error in generateRiskControlMatrix flow with model ${modelName}:`, error.name, error.message, error.stack);
+    let finalErrorMessage: string;
+
+    if (error.message?.startsWith("OpenRouter API request failed") || 
+        error.message?.startsWith("Failed to parse the AI's JSON response") || 
+        error.message?.startsWith("Received an invalid response structure") ||
+        error.message?.startsWith("AI returned an empty string after cleaning markdown.") ||
+        error.message?.startsWith("Received empty or non-string content")) {
+        finalErrorMessage = error.message;
+    } else if (error instanceof ZodError) {
+      const issues = error.errors.map(err => `(${err.path.join('.')}: ${err.message})`).join(', ');
+      finalErrorMessage = `AI response validation failed for model ${modelName}. Issues: ${issues}`;
+    } else if (error instanceof Error) {
+      finalErrorMessage = `Error during RCM generation with model ${modelName}: ${error.message}`;
+    } else {
+      finalErrorMessage = `An unknown error occurred during RCM generation with model ${modelName}.`;
     }
-    throw new Error(`Failed to generate RCM via OpenRouter with model ${modelName}: ${message}`);
+    throw new Error(finalErrorMessage);
   }
 }

@@ -9,7 +9,7 @@
  * - ExtractClausesAndMapToStandardsOutput - The return type for the extractClausesAndMapToStandards function.
  */
 
-import {z} from 'genkit';
+import {z, ZodError} from 'genkit';
 
 const ExtractClausesAndMapToStandardsInputSchema = z.object({
   documentText: z
@@ -90,7 +90,6 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
       body: JSON.stringify({
         model: modelName, 
         messages: [{ role: 'user', content: promptText }],
-        // Ensure response is JSON
         response_format: { type: "json_object" },
       }),
     });
@@ -144,14 +143,23 @@ Do NOT include any explanatory text, markdown formatting like \`\`\`json, or any
     return validatedOutput;
 
   } catch (error: any) {
-    console.error('Error in extractClausesAndMapToStandards flow:', error.name, error.message, error.stack);
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.startsWith("OpenRouter API request failed") || 
-        message.startsWith("Failed to parse the AI's JSON response") || 
-        message.startsWith("Received an invalid response structure") ||
-        message.startsWith("Received empty or non-string content")) {
-        throw error;
+    console.error(`Error in extractClausesAndMapToStandards flow with model ${modelName}:`, error.name, error.message, error.stack);
+    let finalErrorMessage: string;
+
+    if (error.message?.startsWith("OpenRouter API request failed") || 
+        error.message?.startsWith("Failed to parse the AI's JSON response") || 
+        error.message?.startsWith("Received an invalid response structure") ||
+        error.message?.startsWith("AI returned an empty string after cleaning markdown.") ||
+        error.message?.startsWith("Received empty or non-string content")) {
+        finalErrorMessage = error.message;
+    } else if (error instanceof ZodError) {
+      const issues = error.errors.map(err => `(${err.path.join('.')}: ${err.message})`).join(', ');
+      finalErrorMessage = `AI response validation failed for model ${modelName}. Issues: ${issues}`;
+    } else if (error instanceof Error) {
+      finalErrorMessage = `Error during policy analysis with model ${modelName}: ${error.message}`;
+    } else {
+      finalErrorMessage = `An unknown error occurred during policy analysis with model ${modelName}.`;
     }
-    throw new Error(`Failed to extract clauses via OpenRouter with model ${modelName}: ${message}`);
+    throw new Error(finalErrorMessage);
   }
 }
