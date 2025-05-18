@@ -2,6 +2,7 @@
 "use server";
 
 import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
+import pdf from 'pdf-parse';
 
 // Helper function to extract text from Data URI
 async function extractTextFromDataUri(dataUri: string): Promise<string> {
@@ -30,7 +31,7 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   }
 
   // Immediately throw for unsupported types to prevent further processing
-  if (mimeType === 'application/pdf' || mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+  if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt file or enhance this function.`);
     throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt file for now. Advanced parsing for this file type needs to be added.`);
   }
@@ -38,16 +39,31 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   try {
     const buffer = Buffer.from(base64Data, 'base64');
 
-    if (mimeType === 'text/plain') {
+    if (mimeType === 'application/pdf') {
+      try {
+        const data = await pdf(buffer);
+        return data.text;
+      } catch (pdfError: any) {
+        console.error(`Error parsing PDF content. PDF-Parse error:`, pdfError.message);
+        const originalErrorMessage = pdfError instanceof Error ? pdfError.message : String(pdfError);
+        throw new Error(`Failed to parse PDF content. This might be due to a corrupted or password-protected PDF. Original error: ${originalErrorMessage}`);
+      }
+    } else if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else {
+      // For any other unrecognized MIME types that weren't explicitly blocked
       console.warn(`Attempting UTF-8 decoding for unsupported MIME type: ${mimeType}. Results may vary.`);
-      return buffer.toString('utf-8');
+      return buffer.toString('utf-8'); 
     }
   } catch (error: any) {
-    console.error(`Error decoding Base64 content for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
+    // Catch errors from Buffer.from, or re-throw errors from specific handlers if not already an Error instance
+    console.error(`Error decoding Base64 content or converting to buffer for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
     const originalErrorMessage = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to decode or process content for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${originalErrorMessage}`);
+    // Ensure the error being thrown is specific if it came from one of the handlers
+    if (error.message.startsWith("Failed to parse PDF content") || error.message.startsWith("Direct text extraction for")) {
+        throw error; // Re-throw the specific error
+    }
+    throw new Error(`Failed to decode Base64 content or convert to buffer for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${originalErrorMessage}`);
   }
 }
 
@@ -66,24 +82,20 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
       },
     });
 
-    const errorText = await response.text(); // Read text regardless of status for more info
+    const errorText = await response.text(); 
 
     if (response.ok) {
-      // Even if OK, OpenRouter might return data. For /auth/key, a 200 usually means valid.
-      // Some APIs might return { "valid": true } or similar, adjust if needed based on actual OpenRouter response.
       return { isValid: true };
     } else {
       const truncatedErrorText = errorText.length > 300 ? errorText.substring(0, 300) + "..." : errorText;
       if (response.status === 401) {
          try {
-            const errorData = JSON.parse(errorText); // Try to parse if it's JSON
+            const errorData = JSON.parse(errorText); 
             return { isValid: false, error: `Invalid API Key (Unauthorized). ${errorData.error?.message || 'Please check your OpenRouter API key.'} (Status: ${response.status})`.trim() };
         } catch (e) {
-            // If parsing fails, it means the errorText was not JSON
             return { isValid: false, error: `Invalid API Key (Unauthorized). Server response: ${truncatedErrorText} (Status: ${response.status})`.trim() };
         }
       }
-      // For other non-OK statuses
       return { isValid: false, error: `API Key validation failed (Status: ${response.status}). Response: ${truncatedErrorText}`.trim() };
     }
   } catch (error: any) {
@@ -181,7 +193,6 @@ export async function generateRcmAction(
     return { data: result };
   } catch (error: any) {
     console.error("Error in generateRcmAction:", error);
-    // Ensure a clear, string message is returned.
     let errorMessage = "An unknown error occurred while generating the RCM.";
     if (error instanceof Error) {
       errorMessage = error.message;
@@ -194,7 +205,7 @@ export async function generateRcmAction(
         errorMessage = String(error);
       }
     }
-    // Prefix to make it clear it's from this action
     return { error: `RCM Generation Failed: ${errorMessage}` };
   }
 }
+
