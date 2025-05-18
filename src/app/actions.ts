@@ -41,14 +41,13 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
     if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else {
-      // This case should ideally not be reached if PDF/DOCX are handled above.
-      // If other types are attempted, this will try UTF-8 decoding.
       console.warn(`Attempting UTF-8 decoding for unsupported MIME type: ${mimeType}. Results may vary.`);
       return buffer.toString('utf-8');
     }
   } catch (error: any) {
     console.error(`Error decoding Base64 content for MIME type "${mimeType}". Base64 data (first 50 chars):`, base64Data.substring(0,50), "Error:", error.message);
-    throw new Error(`Failed to decode or process content for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${error.message}`);
+    const originalErrorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to decode or process content for MIME type "${mimeType}". This might be due to invalid characters in the document or incorrect encoding. Original error: ${originalErrorMessage}`);
   }
 }
 
@@ -58,11 +57,7 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
     return { isValid: false, error: "API Key cannot be empty." };
   }
   try {
-    // Using a lightweight endpoint to check key validity if /auth/key is not suitable for all key types or scenarios.
-    // A more robust check might involve listing models or a similar low-cost operation.
-    // For this example, we are using the /generation/limits which often works for key validation.
-    // If OpenRouter provides a dedicated key validation endpoint, that should be preferred.
-    const response = await fetch('https://openrouter.ai/api/v1/auth/key', { // Reverted to /auth/key as it's specific for validation
+    const response = await fetch('https://openrouter.ai/api/v1/auth/key', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
@@ -71,23 +66,30 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
       },
     });
 
+    const errorText = await response.text(); // Read text regardless of status for more info
+
     if (response.ok) {
+      // Even if OK, OpenRouter might return data. For /auth/key, a 200 usually means valid.
+      // Some APIs might return { "valid": true } or similar, adjust if needed based on actual OpenRouter response.
       return { isValid: true };
     } else {
-      const errorText = await response.text();
+      const truncatedErrorText = errorText.length > 300 ? errorText.substring(0, 300) + "..." : errorText;
       if (response.status === 401) {
          try {
-            const errorData = JSON.parse(errorText);
-            return { isValid: false, error: `Invalid API Key (Unauthorized). ${errorData.error?.message || 'Please check your OpenRouter API key.'}`.trim() };
+            const errorData = JSON.parse(errorText); // Try to parse if it's JSON
+            return { isValid: false, error: `Invalid API Key (Unauthorized). ${errorData.error?.message || 'Please check your OpenRouter API key.'} (Status: ${response.status})`.trim() };
         } catch (e) {
-            return { isValid: false, error: `Invalid API Key (Unauthorized). Server response: ${errorText}`.trim() };
+            // If parsing fails, it means the errorText was not JSON
+            return { isValid: false, error: `Invalid API Key (Unauthorized). Server response: ${truncatedErrorText} (Status: ${response.status})`.trim() };
         }
       }
-      return { isValid: false, error: `API Key validation failed (status: ${response.status}). Response: ${errorText}`.trim() };
+      // For other non-OK statuses
+      return { isValid: false, error: `API Key validation failed (Status: ${response.status}). Response: ${truncatedErrorText}`.trim() };
     }
   } catch (error: any) {
     console.error("API Key validation fetch error:", error);
-    return { isValid: false, error: `Failed to validate API Key due to a network or server issue: ${error.message}` };
+    const message = error instanceof Error ? error.message : String(error);
+    return { isValid: false, error: `Failed to validate API Key due to a network or server issue: ${message}` };
   }
 }
 
@@ -111,40 +113,44 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
       body: JSON.stringify({
         model: modelName,
         messages: [{ role: 'user', content: "Hello! Respond with 'OK' if you are working." }],
-        max_tokens: 10, // Keep it minimal
+        max_tokens: 10,
       }),
     });
 
-    const responseBody = await response.text(); // Read body once
+    const responseBody = await response.text(); 
 
     if (response.ok) {
       let data;
       try {
         data = JSON.parse(responseBody);
       } catch(e){
-         return { success: false, error: `Model test failed: Could not parse JSON response for ${modelName}. Response: ${responseBody}` };
+         const truncatedBody = responseBody.length > 300 ? responseBody.substring(0, 300) + "..." : responseBody;
+         return { success: false, error: `Model test failed: Could not parse JSON response for ${modelName}. Response: ${truncatedBody}` };
       }
       
       if (data.choices && data.choices.length > 0 && data.choices[0].message) {
         return { success: true, message: `Model ${modelName} responded.` };
       } else {
-        return { success: false, error: `Model test failed: Unexpected response structure from ${modelName}. Response: ${JSON.stringify(data)}` };
+        const truncatedData = JSON.stringify(data).length > 300 ? JSON.stringify(data).substring(0, 300) + "..." : JSON.stringify(data);
+        return { success: false, error: `Model test failed: Unexpected response structure from ${modelName}. Response: ${truncatedData}` };
       }
     } else {
+        const truncatedBody = responseBody.length > 300 ? responseBody.substring(0, 300) + "..." : responseBody;
         if (response.status === 401) {
-             return { success: false, error: `Model test failed: Invalid API Key or unauthorized for ${modelName}. (401)` };
+             return { success: false, error: `Model test failed: Invalid API Key or unauthorized for ${modelName}. (401). Details: ${truncatedBody}` };
         }
-         if (response.status === 429) {
-             return { success: false, error: `Model test failed: Rate limit exceeded for ${modelName}. (429)` };
+        if (response.status === 429) {
+             return { success: false, error: `Model test failed: Rate limit exceeded for ${modelName}. (429). Details: ${truncatedBody}` };
         }
         if (response.status === 404) {
-             return { success: false, error: `Model test failed: Model ${modelName} not found or not accessible. (404)` };
+             return { success: false, error: `Model test failed: Model ${modelName} not found or not accessible. (404). Details: ${truncatedBody}` };
         }
-      return { success: false, error: `Model test failed for ${modelName} (status: ${response.status}). Response: ${responseBody}`.trim() };
+        return { success: false, error: `Model test failed for ${modelName} (Status: ${response.status}). Response: ${truncatedBody}`.trim() };
     }
   } catch (error: any) {
     console.error(`Model test fetch error for ${modelName}:`, error);
-    return { success: false, error: `Failed to test model ${modelName} due to a network or server issue: ${error.message}` };
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: `Failed to test model ${modelName} due to a network or server issue: ${message}` };
   }
 }
 
@@ -173,12 +179,22 @@ export async function generateRcmAction(
 
     const result = await generateRiskControlMatrix(input);
     return { data: result };
-  } catch (error: any)
- {
-    console.error("Error generating RCM:", error);
-    // Return the specific error message from extractTextFromDataUri or generateRiskControlMatrix
-    return { error: error.message || "An unknown error occurred while generating the RCM." };
+  } catch (error: any) {
+    console.error("Error in generateRcmAction:", error);
+    // Ensure a clear, string message is returned.
+    let errorMessage = "An unknown error occurred while generating the RCM.";
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    } else {
+      try {
+        errorMessage = JSON.stringify(error);
+      } catch (_) {
+        errorMessage = String(error);
+      }
+    }
+    // Prefix to make it clear it's from this action
+    return { error: `RCM Generation Failed: ${errorMessage}` };
   }
 }
-
-    
