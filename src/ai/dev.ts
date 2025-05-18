@@ -1,1 +1,5 @@
-// Flows will be imported for their side effects in this file.
+import { config } from 'dotenv';
+config();
+
+import '@/ai/flows/extract-clauses-and-map-to-standards.ts';
+import '@/ai/flows/generate-risk-control-matrix.ts';
