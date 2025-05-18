@@ -164,7 +164,9 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
       clearInterval(progressInterval);
 
       if (!result) {
-        throw new Error("Server action did not return a recognizable response.");
+        // This case should ideally be caught by more specific error handling below,
+        // but as a fallback if the server action returns nothing.
+        throw new Error("Server action did not return a recognizable response. The server might have crashed.");
       }
 
       if (result.data) {
@@ -176,13 +178,15 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
         throw new Error(result.error);
       } else {
         // Fallback if the result object is malformed (neither data nor error)
-        throw new Error("Server action returned an invalid response structure.");
+        console.error("FileUploadSection: handleSubmit received malformed result from server action:", result);
+        throw new Error("Server action returned an invalid response structure. Check client console for details.");
       }
     } catch (err: any) {
       setProgress(0); 
-      console.error("Processing error in FileUploadSection:", err);
-      // Display the error message. If err.message is empty, provide a default.
-      setError(err.message || "An unexpected client-side error occurred during processing.");
+      const errorMessage = err.message || "An unexpected client-side error occurred during processing.";
+      console.error("FileUploadSection: handleSubmit error received by client (raw error object):", err);
+      console.error("FileUploadSection: handleSubmit error message being set to state:", errorMessage);
+      setError(errorMessage);
       setStatusMessage("Processing failed. Please try again.");
     } finally {
       setIsLoading(false);

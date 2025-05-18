@@ -227,6 +227,11 @@ export async function generateRcmAction(
 
     const result = await generateRiskControlMatrix(input);
     
+    if (!result) { // Check if result itself is null or undefined
+        console.error("[generateRcmAction] AI flow returned a null or undefined result.");
+        return { error: `${RCM_ERROR_PREFIX}AI flow returned no result. Check server logs for details.`};
+    }
+
     if (result && Array.isArray(result.rcmEntries)) {
         return { data: result };
     } else {
@@ -258,3 +263,4 @@ export async function generateRcmAction(
     return { error: errorMessage };
   }
 }
+
