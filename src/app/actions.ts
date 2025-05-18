@@ -2,7 +2,6 @@
 "use server";
 
 import { generateRiskControlMatrix, type GenerateRiskControlMatrixInput, type GenerateRiskControlMatrixOutput } from "@/ai/flows/generate-risk-control-matrix";
-// Removed top-level: import pdf from 'pdf-parse';
 
 // Helper function to extract text from Data URI
 async function extractTextFromDataUri(dataUri: string): Promise<string> {
@@ -26,12 +25,13 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
   }
   const mimeType = mimeTypeMatch[1];
 
-  if (base64Data === undefined || base64Data === null) { // Check if base64Data itself is missing
+  if (base64Data === undefined || base64Data === null) {
       throw new Error('Invalid Data URI: Base64 data part is missing.');
   }
   
   if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     console.error(`Full text extraction for ${mimeType} is not yet implemented. Please use a .txt or .pdf file, or enhance this function.`);
+    // Specific error for DOCX
     throw new Error(`Direct text extraction for ${mimeType} is not yet supported. Please use a .txt or .pdf file for now. Advanced parsing for this file type needs to be added.`);
   }
 
@@ -47,27 +47,33 @@ async function extractTextFromDataUri(dataUri: string): Promise<string> {
         // Dynamically import pdf-parse here
         const pdf = (await import('pdf-parse')).default;
         const data = await pdf(buffer);
+        if (!data || typeof data.text !== 'string') {
+          throw new Error('PDF parsing did not return the expected text structure.');
+        }
         return data.text;
       } catch (pdfError: any) {
-        console.error(`Error parsing PDF content with pdf-parse. PDF-Parse error message:`, pdfError.message);
+        console.error(`Error parsing PDF content with pdf-parse. PDF-Parse error message:`, pdfError.message, pdfError.stack);
         const originalErrorMessage = pdfError instanceof Error ? pdfError.message : String(pdfError);
         throw new Error(`Failed to parse PDF content. This might be due to a corrupted, password-protected, or image-only PDF. Original error from pdf-parse: ${originalErrorMessage}`);
       }
     } else if (mimeType === 'text/plain') {
       return buffer.toString('utf-8');
     } else {
+       // This case should ideally be caught earlier if not DOCX or PDF, but as a fallback:
        throw new Error(`Unsupported file type: ${mimeType}. Please use .txt or .pdf files.`);
     }
   } catch (error: any) {
-    console.error(`Error in extractTextFromDataUri for MIME type "${mimeType}". Error:`, error.message);
-    const originalErrorMessage = error instanceof Error ? error.message : String(error);
+    console.error(`Error in extractTextFromDataUri for MIME type "${mimeType}". Error:`, error.message, error.stack);
+    // Re-throw specific errors if they were already well-formed
     if (error.message.startsWith("Failed to parse PDF content") || 
         error.message.startsWith("Direct text extraction for") ||
         error.message.startsWith("The PDF file appears to be empty") ||
-        error.message.startsWith("Unsupported file type:")) {
+        error.message.startsWith("Unsupported file type:") ||
+        error.message.startsWith("PDF parsing did not return the expected text structure.")) {
         throw error; 
     }
-    throw new Error(`Failed to process document content for MIME type "${mimeType}". This might be due to invalid characters or encoding. Original error: ${originalErrorMessage}`);
+    // Fallback for other errors during buffer conversion or text decoding
+    throw new Error(`Failed to process document content for MIME type "${mimeType}". This might be due to invalid characters or encoding. Original error: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -89,6 +95,8 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
     const responseBodyText = await response.text(); 
 
     if (response.ok) {
+      // Optionally check if responseBodyText contains useful data, e.g. {"data": {"key_status": "active"}}
+      // For now, a 200 OK is considered valid.
       return { isValid: true };
     } else {
       let errorMessage = `API Key validation failed (Status: ${response.status}).`;
@@ -107,7 +115,7 @@ export async function validateOpenRouterApiKey(apiKey: string): Promise<{ isVali
       return { isValid: false, error: errorMessage.trim() };
     }
   } catch (error: any) {
-    console.error("API Key validation fetch error:", error);
+    console.error("API Key validation fetch error:", error.name, error.message, error.stack);
     const message = error instanceof Error ? error.message : String(error);
     return { isValid: false, error: `Failed to validate API Key due to a network or server issue: ${message}` };
   }
@@ -160,12 +168,14 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
             const errorData = JSON.parse(responseBodyText);
             if (errorData.error && errorData.error.message) {
               errorMessage += ` Message: ${errorData.error.message}`;
-            } else if (errorData.message) {
+            } else if (errorData.message) { // some OpenRouter errors use "message" directly
                errorMessage += ` Message: ${errorData.message}`;
             } else {
+               // Truncate if response is too long
                errorMessage += ` Response: ${responseBodyText.substring(0, 300)}${responseBodyText.length > 300 ? "..." : ""}`;
             }
         } catch (e) {
+            // If response is not JSON or JSON parsing fails
             errorMessage += ` Raw Response: ${responseBodyText.substring(0, 300)}${responseBodyText.length > 300 ? "..." : ""}`;
         }
         
@@ -178,10 +188,11 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
         if (response.status === 404) { 
              return { success: false, error: `Model test failed: Model ${modelName} not found or not accessible. (404). Details: ${errorMessage}` };
         }
+        // For other HTTP errors
         return { success: false, error: errorMessage.trim() };
     }
   } catch (error: any) {
-    console.error(`Model test fetch error for ${modelName}:`, error);
+    console.error(`Model test fetch error for ${modelName}:`, error.name, error.message, error.stack);
     const message = error instanceof Error ? error.message : String(error);
     return { success: false, error: `Failed to test model ${modelName} due to a network or server issue: ${message}` };
   }
@@ -191,21 +202,23 @@ export async function testOpenRouterModel(apiKey: string, modelName: string): Pr
 export async function generateRcmAction(
   params: { documentDataUri: string; openRouterApiKey: string; modelName: string; }
 ): Promise<{ data?: GenerateRiskControlMatrixOutput; error?: string }> {
+  const RCM_ERROR_PREFIX = "RCM Generation Failed: ";
+
   if (!params.openRouterApiKey) {
-    return { error: "OpenRouter API Key is missing." };
+    return { error: `${RCM_ERROR_PREFIX}OpenRouter API Key is missing.` };
   }
   if (!params.documentDataUri) {
-    return { error: "Document data is missing." };
+    return { error: `${RCM_ERROR_PREFIX}Document data is missing.` };
   }
   if (!params.modelName) {
-    return { error: "AI Model name is missing." };
+    return { error: `${RCM_ERROR_PREFIX}AI Model name is missing.` };
   }
 
   try {
     const documentText = await extractTextFromDataUri(params.documentDataUri);
 
     if (!documentText || documentText.trim() === "") {
-        return { error: "Extracted document text is empty. Cannot proceed with RCM generation. The document might be empty or not parseable." };
+        return { error: `${RCM_ERROR_PREFIX}Extracted document text is empty. Cannot proceed with RCM generation. The document might be empty or not parseable.` };
     }
 
     const input: GenerateRiskControlMatrixInput = {
@@ -215,23 +228,35 @@ export async function generateRcmAction(
     };
 
     const result = await generateRiskControlMatrix(input);
-    return { data: result };
-  } catch (error: any) {
-    console.error("Error in generateRcmAction:", error);
-    let errorMessage = "An unknown error occurred while generating the RCM.";
-    if (error instanceof Error) {
-      errorMessage = error.message;
-    } else if (typeof error === 'string') {
-      errorMessage = error;
-    } else if (error && typeof error.message === 'string') {
-      errorMessage = error.message;
+    // Ensure the result from the flow has the expected structure
+    if (result && Array.isArray(result.rcmEntries)) {
+        return { data: result };
     } else {
+        console.error("[generateRcmAction] AI flow returned unexpected data structure:", result);
+        return { error: `${RCM_ERROR_PREFIX}AI flow returned an unexpected data structure. Expected { rcmEntries: [...] }.`};
+    }
+
+  } catch (e: unknown) {
+    // Enhanced catch block for better diagnostics
+    if (e instanceof Error) {
+      console.error("[generateRcmAction] Caught Error Name:", e.name);
+      console.error("[generateRcmAction] Caught Error Message:", e.message);
+      console.error("[generateRcmAction] Caught Error Stack:", e.stack);
+      return { error: `${RCM_ERROR_PREFIX}${e.message}` };
+    } else if (typeof e === 'string') {
+      console.error("[generateRcmAction] Caught string error:", e);
+      return { error: `${RCM_ERROR_PREFIX}${e}` };
+    } else {
+      console.error("[generateRcmAction] Caught unknown error type. Value:", e);
       try {
-        errorMessage = JSON.stringify(error);
-      } catch (_) {
-        errorMessage = String(error);
+        // Attempt to stringify, but be cautious of large objects or circular refs
+        const stringifiedError = JSON.stringify(e);
+        const truncatedError = stringifiedError.length > 300 ? stringifiedError.substring(0, 300) + "..." : stringifiedError;
+        return { error: `${RCM_ERROR_PREFIX}An unexpected error occurred. Details: ${truncatedError}`};
+      } catch (stringifyError) {
+        console.error("[generateRcmAction] Failed to stringify unknown error:", stringifyError);
+        return { error: `${RCM_ERROR_PREFIX}An unexpected and unstringifiable error occurred.` };
       }
     }
-    return { error: `RCM Generation Failed: ${errorMessage}` };
   }
 }
