@@ -37,6 +37,7 @@ const AVAILABLE_MODELS = [
     { id: "google/gemma-2-9b-it:free", name: "Google: Gemma 2 9B Instruct (Free)" },
     { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)" },
     { id: "mistralai/mistral-7b-instruct:free", name: "Mistral: Mistral 7B Instruct (Free)" },
+    { id: "moonshotai/kimi-k2:free", name: "Moonshot AI: Kimi K2 (Free)" },
     { id: "nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free", name: "Nous: Hermes 2 Mixtral 8x7B DPO (Free)" },
     { id: "openchat/openchat-3.5:free", name: "OpenChat: OpenChat 3.5 (Free)" },
     { id: "qwen/qwen-2-7b-instruct:free", name: "Qwen: Qwen 2 7B Instruct (Free)" },
