@@ -34,15 +34,14 @@ const ACCEPTED_FILE_TYPES = {
 };
 
 const AVAILABLE_MODELS = [
-  { id: "deepseek/deepseek-chat-v3-0324:free", name: "DeepSeek: DeepSeek V3 0324 (Free)" },
-  { id: "microsoft/mai-ds-r1:free", name: "Microsoft: MAI DS R1 (Free)" },
-  { id: "google/gemma-7b-it:free", name: "Google: Gemma 7B It (Free)" },
-  { id: "mistralai/mistral-7b-instruct:free", name: "Mistral: Mistral 7B Instruct (Free)" },
-  { id: "openchat/openchat-7b:free", name: "OpenChat: OpenChat 7B (Free)" },
-  { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)"},
-  { id: "nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free", name: "Nous: Hermes 2 Mixtral 8x7B DPO (Free)"},
-  { id: "gryphe/gryphe-mistral-7b-v2:free", name: "Gryphe: Mistral 7B v2 (Free)"},
-  { id: "moonshotai/kimi-k2:free", name: "Moonshot AI: Kimi K2 (Free)" },
+    { id: "google/gemma-2-9b-it:free", name: "Google: Gemma 2 9B Instruct (Free)" },
+    { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)" },
+    { id: "mistralai/mistral-7b-instruct:free", name: "Mistral: Mistral 7B Instruct (Free)" },
+    { id: "nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free", name: "Nous: Hermes 2 Mixtral 8x7B DPO (Free)" },
+    { id: "openchat/openchat-3.5:free", name: "OpenChat: OpenChat 3.5 (Free)" },
+    { id: "qwen/qwen-2-7b-instruct:free", name: "Qwen: Qwen 2 7B Instruct (Free)" },
+    { id: "microsoft/phi-3-mini-128k-instruct:free", name: "Microsoft: Phi-3 Mini 128k (Free)" },
+    { id: "cognitivecomputations/dolphin-mixtral-8x7b:free", name: "Cognitive Computations: Dolphin Mixtral (Free)" }
 ];
 
 export default function FileUploadSection({ openRouterApiKey, onProcessingComplete }: FileUploadSectionProps) {
