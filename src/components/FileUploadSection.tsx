@@ -42,6 +42,7 @@ const AVAILABLE_MODELS = [
   { id: "meta-llama/llama-3-8b-instruct:free", name: "Meta: Llama 3 8B Instruct (Free)"},
   { id: "nousresearch/nous-hermes-2-mixtral-8x7b-dpo:free", name: "Nous: Hermes 2 Mixtral 8x7B DPO (Free)"},
   { id: "gryphe/gryphe-mistral-7b-v2:free", name: "Gryphe: Mistral 7B v2 (Free)"},
+  { id: "moonshotai/kimi-k2:free", name: "Moonshot AI: Kimi K2 (Free)" },
 ];
 
 export default function FileUploadSection({ openRouterApiKey, onProcessingComplete }: FileUploadSectionProps) {
@@ -317,4 +318,3 @@ export default function FileUploadSection({ openRouterApiKey, onProcessingComple
     </Card>
   );
 }
-
